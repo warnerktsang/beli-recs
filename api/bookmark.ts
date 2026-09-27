@@ -16,7 +16,10 @@
  *   4. GET /api/search-app/?term=&city=    -> candidate businesses
  *   5. Confidence gate: only an exact/near-exact normalized name match proceeds.
  *      Anything else returns status "ambiguous" with candidates — no write.
- *   6. POST /api/add-bookmark/ {user_id, business_id}
+ *   6. Duplicate-record guard: if any confidently-matching prediction is already
+ *      ranked/bookmarked under another Beli record for the same restaurant,
+ *      report "already_ranked"/"already_bookmarked" — never write a duplicate.
+ *   7. POST /api/add-bookmark/ {user_id, business_id}
  *
  * Statuses: "bookmarked" | "already_bookmarked" | "already_ranked"
  *           | "would_bookmark" (dry_run) | "ambiguous" | "no_results" | error
@@ -175,8 +178,31 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // resolve the winning prediction to a Beli business id
-    const pred: any = match.business;
+    // Beli's DB holds duplicate records for the same restaurant (e.g. two ids
+    // for one "Chrissy's Pizza"). If ANY confidently-matching prediction is
+    // already ranked or bookmarked — under any record — report that state
+    // instead of acting on a duplicate.
+    const dupRankedPred = named.find(
+      (p: any) =>
+        typeof p.business === "number" &&
+        rankedIds.has(p.business) &&
+        confidentMatch(name, [p]) !== null
+    );
+    const dupSavedPred = named.find(
+      (p: any) =>
+        typeof p.business === "number" &&
+        bookmarkedIds.has(p.business) &&
+        confidentMatch(name, [p]) !== null
+    );
+    const dupStatus = dupRankedPred
+      ? "already_ranked"
+      : dupSavedPred
+        ? "already_bookmarked"
+        : null;
+
+    // resolve the winning prediction (or the already-handled duplicate record)
+    // to a Beli business id
+    const pred: any = dupRankedPred ?? dupSavedPred ?? match.business;
     let bizId: number | undefined =
       typeof pred.business === "number" ? pred.business : undefined;
     let bizName: string = pred.name;
@@ -205,20 +231,11 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // dedup runs for both dry-run and live paths: an already-saved or
-    // already-ranked business must report its state even when dry_run
-    // short-circuits the write
-    if (bizId !== undefined && bookmarkedIds.has(bizId)) {
+    // already-saved / already-ranked reporting runs for both dry-run and live
+    // paths (dupStatus covers the winner itself too, since it is in `named`)
+    if (dupStatus) {
       res.status(200).json({
-        status: "already_bookmarked",
-        name,
-        business: { id: bizId, name: bizName, neighborhood: bizNeighborhood },
-      });
-      return;
-    }
-    if (bizId !== undefined && rankedIds.has(bizId)) {
-      res.status(200).json({
-        status: "already_ranked",
+        status: dupStatus,
         name,
         business: { id: bizId, name: bizName, neighborhood: bizNeighborhood },
       });
