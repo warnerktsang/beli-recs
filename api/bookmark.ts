@@ -112,74 +112,116 @@ export default async function handler(req: any, res: any) {
     }
 
     // existing bookmarks (dedup)
-    const bmRaw = await call("/api/get-bookmark/");
+    const bmRaw = await call(`/api/get-bookmark/?user=${userUuid}&category=RES`);
     const bookmarkedIds = new Set(
       resultsOf(bmRaw)
         .map((item: any) => item?.business?.id ?? item?.business_id ?? item?.id)
         .filter((id: any) => id !== undefined && id !== null)
     );
 
-    // search Beli
-    const params = new URLSearchParams({ term: name });
+    // search Beli (Google Places typeahead; predictions optionally carry a
+    // Beli business id)
+    const params = new URLSearchParams({ term: name, user: userUuid });
     if (city) params.set("city", city);
     const searchRaw = await call(`/api/search-app/?${params.toString()}`);
-    const businesses = resultsOf(searchRaw)
-      .map((item: any) => item?.business ?? item)
-      .filter((b: any) => b?.id && b?.name);
-    if (!businesses.length) {
+    const predictions: any[] = Array.isArray((searchRaw as any)?.predictions)
+      ? (searchRaw as any).predictions
+      : [];
+    const named = predictions
+      .map((p: any) => ({
+        ...p,
+        name: String(
+          p?.structured_formatting?.main_text ?? p?.name ?? ""
+        ).trim(),
+        detail: String(
+          p?.structured_formatting?.secondary_text ?? ""
+        ).trim() || null,
+      }))
+      .filter((p: any) => p.name);
+    if (!named.length) {
       res.status(200).json({ status: "no_results", name, city: city ?? null });
       return;
     }
 
-    const match = confidentMatch(name, businesses);
+    const match = confidentMatch(name, named);
     if (!match) {
       res.status(200).json({
         status: "ambiguous",
         name,
         city: city ?? null,
-        candidates: businesses.slice(0, 5).map((b: any) => ({
-          id: b.id,
-          name: b.name,
-          neighborhood: b.neighborhood ?? null,
-          city: b.city ?? null,
+        candidates: named.slice(0, 5).map((p: any) => ({
+          name: p.name,
+          detail: p.detail,
         })),
       });
       return;
     }
 
-    const biz = match.business;
-    if (bookmarkedIds.has(biz.id)) {
-      res.status(200).json({
-        status: "already_bookmarked",
-        name,
-        business: { id: biz.id, name: biz.name },
-      });
-      return;
+    // resolve the winning prediction to a Beli business id
+    const pred: any = match.business;
+    let bizId: number | undefined =
+      typeof pred.business === "number" ? pred.business : undefined;
+    let bizName: string = pred.name;
+    let bizNeighborhood: string | null = null;
+    if (bizId === undefined && pred.place_id && !dryRun) {
+      // get-or-create the Beli business from the Google place (real bookmark path)
+      const created = await call(
+        `/api/business/?place_id=${encodeURIComponent(pred.place_id)}`
+      );
+      const c0 = resultsOf(created)[0] ?? {};
+      const full = (c0 as any)?.business ?? c0;
+      bizId = full?.id;
+      bizName = full?.name ?? pred.name;
+      bizNeighborhood = full?.neighborhood ?? null;
+    } else if (bizId !== undefined) {
+      try {
+        const d = await call(`/api/business/?id=${bizId}`);
+        const d0 = resultsOf(d)[0] ?? {};
+        const full = (d0 as any)?.business ?? d0;
+        if (full?.id) {
+          bizName = full?.name ?? pred.name;
+          bizNeighborhood = full?.neighborhood ?? null;
+        }
+      } catch {
+        /* keep prediction name */
+      }
     }
+
     if (dryRun) {
       res.status(200).json({
         status: "would_bookmark",
         name,
-        business: {
-          id: biz.id,
-          name: biz.name,
-          neighborhood: biz.neighborhood ?? null,
-        },
+        business: bizId
+          ? { id: bizId, name: bizName, neighborhood: bizNeighborhood }
+          : { name: pred.name, detail: pred.detail, place_id: pred.place_id },
+      });
+      return;
+    }
+    if (!bizId) {
+      res.status(500).json({ error: "could not resolve a Beli business id" });
+      return;
+    }
+
+    if (bookmarkedIds.has(bizId)) {
+      res.status(200).json({
+        status: "already_bookmarked",
+        name,
+        business: { id: bizId, name: bizName },
       });
       return;
     }
 
     await call("/api/add-bookmark/", {
       method: "POST",
-      body: { user_id: userUuid, business_id: biz.id },
+      body: { user_id: userUuid, business_id: bizId },
     });
     res.status(200).json({
       status: "bookmarked",
       name,
       business: {
-        id: biz.id,
-        name: biz.name,
-        neighborhood: biz.neighborhood ?? null,
+        id: bizId,
+        name: bizName,
+        neighborhood: bizNeighborhood,
       },
     });
   } catch (e: any) {
