@@ -188,7 +188,7 @@ def main():
                 if b.get("neighborhood"):
                     label += f" ({b['neighborhood']})"
                 bookmarked.append(label)
-            elif st == "already_bookmarked":
+            elif st in ("already_bookmarked", "already_ranked"):
                 already.append(name)
             elif st in ("ambiguous", "no_results"):
                 skipped.append(name)
