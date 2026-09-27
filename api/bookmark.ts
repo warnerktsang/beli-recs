@@ -17,8 +17,8 @@
  *      Anything else returns status "ambiguous" with candidates — no write.
  *   5. POST /api/add-bookmark/ {user_id, business_id}
  *
- * Statuses: "bookmarked" | "already_bookmarked" | "would_bookmark" (dry_run)
- *           | "ambiguous" | "no_results" | error
+ * Statuses: "bookmarked" | "already_bookmarked" | "already_ranked"
+ *           | "would_bookmark" (dry_run) | "ambiguous" | "no_results" | error
  */
 import { beliApiWithReauth, resultsOf } from "../lib/beli";
 
@@ -119,6 +119,23 @@ export default async function handler(req: any, res: any) {
         .filter((id: any) => id !== undefined && id !== null)
     );
 
+    // existing rankings — Beli drops a bookmark once its place is ranked, so a
+    // ranked place must never be re-bookmarked. Best-effort: a failure here
+    // must not block the bookmark path.
+    let rankedIds = new Set<number>();
+    try {
+      const rankRaw = await call(
+        `/api/get-ranking/?user=${userUuid}&category=RES`
+      );
+      rankedIds = new Set(
+        resultsOf(rankRaw)
+          .map((item: any) => item?.business?.id ?? item?.business_id ?? item?.id)
+          .filter((id: any) => id !== undefined && id !== null)
+      );
+    } catch {
+      /* keep rankedIds empty */
+    }
+
     // search Beli (Google Places typeahead; predictions optionally carry a
     // Beli business id)
     const params = new URLSearchParams({ term: name, user: userUuid });
@@ -187,11 +204,20 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // dedup runs for both dry-run and live paths: an already-saved business
-    // must report already_bookmarked even when dry_run short-circuits the write
+    // dedup runs for both dry-run and live paths: an already-saved or
+    // already-ranked business must report its state even when dry_run
+    // short-circuits the write
     if (bizId !== undefined && bookmarkedIds.has(bizId)) {
       res.status(200).json({
         status: "already_bookmarked",
+        name,
+        business: { id: bizId, name: bizName, neighborhood: bizNeighborhood },
+      });
+      return;
+    }
+    if (bizId !== undefined && rankedIds.has(bizId)) {
+      res.status(200).json({
+        status: "already_ranked",
         name,
         business: { id: bizId, name: bizName, neighborhood: bizNeighborhood },
       });
