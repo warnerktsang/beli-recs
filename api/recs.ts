@@ -198,11 +198,15 @@ export default async function handler(req: any, res: any) {
     const me = await call("/api/user/logged-in/");
     const meObj = resultsOf(me)[0] ?? me;
     const userUuid: string | undefined = meObj?.uuid ?? meObj?.id;
+    if (!userUuid) {
+      res.status(500).json({ error: "could not resolve logged-in user uuid" });
+      return;
+    }
 
     // bookmarks + trending in parallel-ish (sequential w/ pacing inside client)
     const [bmRaw, trRaw] = await Promise.all([
-      call("/api/get-bookmark/"),
-      userUuid ? call(`/api/trending/${userUuid}/`) : Promise.resolve({ results: [] }),
+      call(`/api/get-bookmark/?user=${userUuid}&category=RES`),
+      call(`/api/trending/${userUuid}/`),
     ]);
     const bookmarkItems = resultsOf(bmRaw);
     const trendingItems = resultsOf(trRaw);
