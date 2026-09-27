@@ -25,7 +25,21 @@ CRED = "custom.vercel"
 TEAM_ID = "team_nLH0xQvdv4obUiXd6DoUePxb"
 PROJECT = "beli-recs"
 ROOT = "/home/hatch/workspace/beli-recs"
-FILES = ["api/recs.ts", "api/bookmark.ts", "lib/beli.ts", "package.json"]
+
+
+def project_files():
+    """All api/*.ts endpoints plus shared lib and package.json."""
+    import glob as _glob
+    import os as _os
+
+    files = sorted(
+        _os.path.relpath(p, ROOT)
+        for p in _glob.glob(_os.path.join(ROOT, "api", "*.ts"))
+    )
+    return files + ["lib/beli.ts", "package.json"]
+
+
+FILES = project_files()
 
 
 def api(method, path, data=None, team=True):
