@@ -187,6 +187,17 @@ export default async function handler(req: any, res: any) {
       }
     }
 
+    // dedup runs for both dry-run and live paths: an already-saved business
+    // must report already_bookmarked even when dry_run short-circuits the write
+    if (bizId !== undefined && bookmarkedIds.has(bizId)) {
+      res.status(200).json({
+        status: "already_bookmarked",
+        name,
+        business: { id: bizId, name: bizName, neighborhood: bizNeighborhood },
+      });
+      return;
+    }
+
     if (dryRun) {
       res.status(200).json({
         status: "would_bookmark",
@@ -199,15 +210,6 @@ export default async function handler(req: any, res: any) {
     }
     if (!bizId) {
       res.status(500).json({ error: "could not resolve a Beli business id" });
-      return;
-    }
-
-    if (bookmarkedIds.has(bizId)) {
-      res.status(200).json({
-        status: "already_bookmarked",
-        name,
-        business: { id: bizId, name: bizName },
-      });
       return;
     }
 
