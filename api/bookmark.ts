@@ -12,10 +12,11 @@
  * Pipeline:
  *   1. GET /api/user/logged-in/            -> user uuid
  *   2. GET /api/get-bookmark/              -> existing bookmark ids (dedup)
- *   3. GET /api/search-app/?term=&city=    -> candidate businesses
- *   4. Confidence gate: only an exact/near-exact normalized name match proceeds.
+ *   3. GET /api/get-ranking/              -> already-ranked ids (never re-bookmark)
+ *   4. GET /api/search-app/?term=&city=    -> candidate businesses
+ *   5. Confidence gate: only an exact/near-exact normalized name match proceeds.
  *      Anything else returns status "ambiguous" with candidates — no write.
- *   5. POST /api/add-bookmark/ {user_id, business_id}
+ *   6. POST /api/add-bookmark/ {user_id, business_id}
  *
  * Statuses: "bookmarked" | "already_bookmarked" | "already_ranked"
  *           | "would_bookmark" (dry_run) | "ambiguous" | "no_results" | error
