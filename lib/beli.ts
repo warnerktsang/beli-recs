@@ -166,9 +166,17 @@ export async function beliApiWithReauth(
   }
 }
 
-/** Unwrap Beli's {results: [...]} envelopes (or pass through raw arrays). */
+/** Unwrap Beli's response envelopes into arrays.
+ *  Handles: raw arrays, {results: [...]}, and category-keyed objects like
+ *  {"Restaurants": [...]} from /api/get-bookmark/. */
 export function resultsOf(data: any): any[] {
   if (Array.isArray(data)) return data;
   if (data && Array.isArray(data.results)) return data.results;
+  if (data && typeof data === "object") {
+    if (Array.isArray((data as any).Restaurants)) return (data as any).Restaurants;
+    for (const v of Object.values(data)) {
+      if (Array.isArray(v)) return v;
+    }
+  }
   return [];
 }
