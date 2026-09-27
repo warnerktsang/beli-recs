@@ -143,7 +143,9 @@ export async function beliApi(
       `Beli ${opts.method ?? "GET"} ${path} -> ${res.status} ${text.slice(0, 200)}`
     );
   }
-  return res.json();
+  // some Beli writes (e.g. add-bookmark) answer 200/201 with an empty body
+  const text = await res.text().catch(() => "");
+  return text ? JSON.parse(text) : null;
 }
 
 /** Same as beliApi but retries once after re-auth on 401. */
